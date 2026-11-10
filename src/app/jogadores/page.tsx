@@ -12,12 +12,13 @@ import {
 } from '@/lib/storage';
 import { getEloShortLabel, getEloBgColor } from '@/lib/balancer';
 import defaultPlayersData from '@/data/players.json';
-import EloSelector from '@/components/EloSelector';
+import SportEloPicker from '@/components/SportEloPicker';
 import Modal from '@/components/Modal';
 
 export default function JogadoresPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSportFilter, setSelectedSportFilter] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [newName, setNewName] = useState('');
@@ -32,9 +33,12 @@ export default function JogadoresPage() {
     setPlayers(loadPlayers());
   }, []);
 
-  const filteredPlayers = players.filter((p) =>
-    p.name.toLowerCase().includes(searchQuery.toLowerCase().trim())
-  );
+  const filteredPlayers = players.filter((p) => {
+    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
+    if (!matchesSearch) return false;
+    if (selectedSportFilter === 'all') return true;
+    return p.elos[selectedSportFilter] !== undefined;
+  });
 
   const handleAdd = useCallback(() => {
     if (!newName.trim()) return;
@@ -133,7 +137,7 @@ export default function JogadoresPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-100 tracking-tight">
@@ -144,7 +148,7 @@ export default function JogadoresPage() {
             </span>
           </div>
           <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Cada jogador tem seu nível salvo por modalidade. Se alterar o esporte, mantemos o mesmo jogador com o elo respectivo.
+            Defina exatamente quais esportes cada jogador pratica e o seu nível específico em cada um.
           </p>
         </div>
 
@@ -193,30 +197,45 @@ export default function JogadoresPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <div className="relative mb-6">
-        <svg
-          className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500"
-          xmlns="http://www.w3.org/2000/svg"
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
+      {/* Filter and Search Bar */}
+      <div className="flex flex-col sm:flex-row gap-2.5 mb-6">
+        <div className="relative flex-1">
+          <svg
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500"
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="11" cy="11" r="8" />
+            <path d="M21 21l-4.3-4.3" />
+          </svg>
+          <input
+            type="text"
+            placeholder="Buscar jogador por nome..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 text-zinc-100 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/20 transition-all"
+          />
+        </div>
+
+        <select
+          value={selectedSportFilter}
+          onChange={(e) => setSelectedSportFilter(e.target.value)}
+          className="bg-zinc-900/90 border border-zinc-800 text-zinc-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-violet-500"
         >
-          <circle cx="11" cy="11" r="8" />
-          <path d="M21 21l-4.3-4.3" />
-        </svg>
-        <input
-          type="text"
-          placeholder="Buscar jogador por nome..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 text-zinc-100 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/20 transition-all"
-        />
+          <option value="all">Todas as modalidades</option>
+          {SPORTS.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.emoji} Praticantes de {s.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       {/* Players List */}
@@ -226,12 +245,16 @@ export default function JogadoresPage() {
           <p className="text-zinc-400 text-sm font-medium">
             {players.length === 0
               ? 'Nenhum jogador cadastrado no momento.'
-              : 'Nenhum jogador encontrado com essa busca.'}
+              : 'Nenhum jogador encontrado para os filtros selecionados.'}
           </p>
           <div className="flex items-center justify-center gap-3 mt-4">
             <button
               type="button"
-              onClick={() => setShowAddModal(true)}
+              onClick={() => {
+                setNewName('');
+                setNewElos({});
+                setShowAddModal(true);
+              }}
               className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-all cursor-pointer"
             >
               Cadastrar Jogador
@@ -262,7 +285,9 @@ export default function JogadoresPage() {
                       {player.name}
                     </span>
                     <span className="text-[11px] text-zinc-500 font-mono">
-                      {eloEntries.length} esporte{eloEntries.length !== 1 ? 's' : ''}
+                      {eloEntries.length === 0
+                        ? 'Nenhum esporte marcado'
+                        : `${eloEntries.length} ${eloEntries.length === 1 ? 'esporte' : 'esportes'}`}
                     </span>
                   </div>
 
@@ -285,8 +310,8 @@ export default function JogadoresPage() {
                       );
                     })}
                     {eloEntries.length === 0 && (
-                      <span className="text-xs text-zinc-500 italic">
-                        Sem avaliações específicas (assume Médio por padrão)
+                      <span className="text-xs text-amber-400/80 italic">
+                        ⚠️ Não joga nenhuma modalidade ainda (clique em editar para ativar)
                       </span>
                     )}
                   </div>
@@ -297,7 +322,7 @@ export default function JogadoresPage() {
                     type="button"
                     onClick={() => openEdit(player)}
                     className="p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all cursor-pointer"
-                    title="Editar Elos do Jogador"
+                    title="Editar Modalidades e Elos"
                   >
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -371,7 +396,7 @@ export default function JogadoresPage() {
           setNewName('');
           setNewElos({});
         }}
-        title={editingPlayer ? `Editar: ${editingPlayer.name}` : 'Cadastrar Novo Jogador'}
+        title={editingPlayer ? `Editar Jogador: ${editingPlayer.name}` : 'Cadastrar Novo Jogador'}
       >
         <div className="space-y-4">
           <div>
@@ -382,10 +407,6 @@ export default function JogadoresPage() {
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) =>
-                e.key === 'Enter' &&
-                (editingPlayer ? handleEdit() : handleAdd())
-              }
               placeholder="Ex: Carlos, Mariana, Dudu..."
               autoFocus
               className="w-full px-4 py-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
@@ -393,41 +414,13 @@ export default function JogadoresPage() {
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-                Classificação por Modalidade
-              </label>
-              <span className="text-[11px] text-zinc-500">
-                (opcional — padrão é Mid)
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              {SPORTS.map((sport) => {
-                const current = newElos[sport.id] || 'mid';
-                return (
-                  <div
-                    key={sport.id}
-                    className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/80"
-                  >
-                    <span className="text-xs text-zinc-300 font-medium flex items-center gap-1.5 truncate pr-2">
-                      <span>{sport.emoji}</span>
-                      <span className="truncate">{sport.name}</span>
-                    </span>
-                    <EloSelector
-                      value={current}
-                      onChange={(elo) =>
-                        setNewElos((prev) => ({ ...prev, [sport.id]: elo }))
-                      }
-                      size="sm"
-                    />
-                  </div>
-                );
-              })}
-            </div>
+            <SportEloPicker
+              elos={newElos}
+              onChange={setNewElos}
+            />
           </div>
 
-          <div className="flex gap-2.5 pt-3">
+          <div className="flex gap-2.5 pt-3 border-t border-zinc-800">
             <button
               type="button"
               onClick={() => {
@@ -446,7 +439,7 @@ export default function JogadoresPage() {
               disabled={!newName.trim()}
               className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
             >
-              {editingPlayer ? 'Salvar Alterações' : 'Cadastrar'}
+              {editingPlayer ? 'Salvar Alterações' : 'Cadastrar Jogador'}
             </button>
           </div>
         </div>

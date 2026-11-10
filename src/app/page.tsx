@@ -7,6 +7,7 @@ import { loadPlayers, savePlayers, generateId } from '@/lib/storage';
 import { balanceTeams, getEloShortLabel, getEloBgColor } from '@/lib/balancer';
 import SportSelector from '@/components/SportSelector';
 import EloSelector from '@/components/EloSelector';
+import SportEloPicker from '@/components/SportEloPicker';
 import TeamCard from '@/components/TeamCard';
 import Modal from '@/components/Modal';
 
@@ -18,17 +19,20 @@ export default function SorteioPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState('');
-  const [newPlayerElo, setNewPlayerElo] = useState<Elo>('mid');
+  const [newPlayerElos, setNewPlayerElos] = useState<Record<string, Elo>>({
+    [SPORTS[0].id]: 'mid',
+  });
+  const [showOtherPlayers, setShowOtherPlayers] = useState(false);
   const [copied, setCopied] = useState(false);
   const [numTeamsOverride, setNumTeamsOverride] = useState<number | null>(null);
 
   useEffect(() => {
     const loaded = loadPlayers();
     setAllPlayers(loaded);
-    // Pre-select first 12 players for quick preview if available
-    if (loaded.length > 0) {
-      const initialSelection = new Set(loaded.slice(0, 12).map((p) => p.id));
-      setSelectedPlayerIds(initialSelection);
+    // Pre-select players who actually play the default sport
+    if (loaded.length > 0 && SPORTS[0]) {
+      const eligible = loaded.filter((p) => p.elos[SPORTS[0].id] !== undefined);
+      setSelectedPlayerIds(new Set(eligible.map((p) => p.id)));
     }
   }, []);
 
@@ -36,6 +40,12 @@ export default function SorteioPage() {
     setSelectedSport(sport);
     setTeams([]);
     setNumTeamsOverride(null);
+    // Pre-select only players who actually practice this sport
+    setAllPlayers((currentPlayers) => {
+      const eligible = currentPlayers.filter((p) => p.elos[sport.id] !== undefined);
+      setSelectedPlayerIds(new Set(eligible.map((p) => p.id)));
+      return currentPlayers;
+    });
   }, []);
 
   const togglePlayer = useCallback((playerId: string) => {
@@ -51,10 +61,24 @@ export default function SorteioPage() {
     setTeams([]);
   }, []);
 
-  const handleSelectAll = useCallback(() => {
-    setSelectedPlayerIds(new Set(allPlayers.map((p) => p.id)));
+  // Players who actively play the selected sport
+  const sportPlayers = useMemo(() => {
+    if (!selectedSport) return [];
+    return allPlayers.filter((p) => p.elos[selectedSport.id] !== undefined);
+  }, [allPlayers, selectedSport]);
+
+  // Players who DO NOT currently play the selected sport
+  const nonSportPlayers = useMemo(() => {
+    if (!selectedSport) return [];
+    return allPlayers.filter((p) => p.elos[selectedSport.id] === undefined);
+  }, [allPlayers, selectedSport]);
+
+  const handleSelectAllSportPlayers = useCallback(() => {
+    if (!selectedSport) return;
+    const ids = sportPlayers.map((p) => p.id);
+    setSelectedPlayerIds(new Set(ids));
     setTeams([]);
-  }, [allPlayers]);
+  }, [selectedSport, sportPlayers]);
 
   const handleClearSelection = useCallback(() => {
     setSelectedPlayerIds(new Set());
@@ -75,31 +99,89 @@ export default function SorteioPage() {
     [allPlayers, selectedSport]
   );
 
-  const handleAddQuickPlayer = useCallback(() => {
-    if (!newPlayerName.trim() || !selectedSport) return;
+  const handleEnableSportForPlayer = useCallback(
+    (player: Player, initialElo: Elo = 'mid') => {
+      if (!selectedSport) return;
+      const updated = allPlayers.map((p) =>
+        p.id === player.id
+          ? { ...p, elos: { ...p.elos, [selectedSport.id]: initialElo } }
+          : p
+      );
+      setAllPlayers(updated);
+      savePlayers(updated);
+      // Automatically check them in for the draw
+      setSelectedPlayerIds((prev) => new Set(prev).add(player.id));
+      setTeams([]);
+    },
+    [allPlayers, selectedSport]
+  );
+
+  const handleDisableSportForPlayer = useCallback(
+    (playerId: string) => {
+      if (!selectedSport) return;
+      const updated = allPlayers.map((p) => {
+        if (p.id !== playerId) return p;
+        const newElos = { ...p.elos };
+        delete newElos[selectedSport.id];
+        return { ...p, elos: newElos };
+      });
+      setAllPlayers(updated);
+      savePlayers(updated);
+      setSelectedPlayerIds((prev) => {
+        const next = new Set(prev);
+        next.delete(playerId);
+        return next;
+      });
+      setTeams([]);
+    },
+    [allPlayers, selectedSport]
+  );
+
+  const handleOpenAddModal = useCallback(() => {
+    setNewPlayerName('');
+    // Initialize modal with only the currently active sport selected
+    setNewPlayerElos(selectedSport ? { [selectedSport.id]: 'mid' } : {});
+    setShowAddModal(true);
+  }, [selectedSport]);
+
+  const handleAddPlayer = useCallback(() => {
+    if (!newNamePlayerTrimmed) return;
     const player: Player = {
       id: generateId(),
       name: newPlayerName.trim(),
-      elos: { [selectedSport.id]: newPlayerElo },
+      elos: { ...newPlayerElos },
     };
     const updated = [player, ...allPlayers];
     setAllPlayers(updated);
     savePlayers(updated);
-    setSelectedPlayerIds((prev) => new Set(prev).add(player.id));
+
+    // If the player plays the current sport, select them
+    if (selectedSport && player.elos[selectedSport.id]) {
+      setSelectedPlayerIds((prev) => new Set(prev).add(player.id));
+    }
     setNewPlayerName('');
-    setNewPlayerElo('mid');
+    setNewPlayerElos({});
     setShowAddModal(false);
-  }, [newPlayerName, newPlayerElo, selectedSport, allPlayers]);
+  }, [newPlayerName, newPlayerElos, allPlayers, selectedSport]);
+
+  const newNamePlayerTrimmed = newPlayerName.trim();
+
+  // Filtered lists according to search
+  const filteredSportPlayers = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return sportPlayers;
+    return sportPlayers.filter((p) => p.name.toLowerCase().includes(q));
+  }, [sportPlayers, searchQuery]);
+
+  const filteredNonSportPlayers = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return nonSportPlayers;
+    return nonSportPlayers.filter((p) => p.name.toLowerCase().includes(q));
+  }, [nonSportPlayers, searchQuery]);
 
   const selectedPlayersList = useMemo(() => {
     return allPlayers.filter((p) => selectedPlayerIds.has(p.id));
   }, [allPlayers, selectedPlayerIds]);
-
-  const filteredPlayers = useMemo(() => {
-    const q = searchQuery.toLowerCase().trim();
-    if (!q) return allPlayers;
-    return allPlayers.filter((p) => p.name.toLowerCase().includes(q));
-  }, [allPlayers, searchQuery]);
 
   const minPlayers = selectedSport ? selectedSport.teamSize * 2 : 2;
   const canSort = selectedPlayersList.length >= minPlayers;
@@ -171,12 +253,12 @@ export default function SorteioPage() {
               Sorteio de Times Equilibrados
             </h1>
             <p className="text-sm text-zinc-400 mt-1 max-w-xl">
-              Defina o esporte, selecione quem vai jogar e ajuste o Elo (High, Mid, Low). Nosso algoritmo faz a distribuição justa por nível técnico.
+              Defina o esporte e selecione os jogadores presentes. O sistema lista quem pratica a modalidade com seu respectivo Elo.
             </p>
           </div>
           <button
             type="button"
-            onClick={() => setShowAddModal(true)}
+            onClick={handleOpenAddModal}
             className="self-start sm:self-center px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold shadow-lg shadow-violet-600/30 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer"
           >
             <svg
@@ -210,7 +292,7 @@ export default function SorteioPage() {
           </div>
           {selectedSport && (
             <span className="text-xs text-zinc-400">
-              {selectedSport.emoji} {selectedSport.name} ({selectedSport.teamSize} jogadores por time)
+              {selectedSport.emoji} {selectedSport.name} ({selectedSport.teamSize} por time)
             </span>
           )}
         </div>
@@ -230,19 +312,19 @@ export default function SorteioPage() {
                   2
                 </span>
                 <h2 className="text-base font-bold text-zinc-100 tracking-tight">
-                  Quem está presente para jogar?
+                  Quem vai jogar {selectedSport.name}?
                 </h2>
                 <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-                  {selectedPlayersList.length} selecionados
+                  {selectedPlayersList.length} escalados
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleSelectAll}
+                  onClick={handleSelectAllSportPlayers}
                   className="px-3 py-1.5 rounded-lg text-xs font-medium text-zinc-300 bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700 transition-colors cursor-pointer"
                 >
-                  Selecionar todos
+                  Selecionar praticantes ({sportPlayers.length})
                 </button>
                 <button
                   type="button"
@@ -257,7 +339,7 @@ export default function SorteioPage() {
             {/* Elo pool overview bar */}
             <div className="mb-3 p-3 rounded-xl bg-zinc-900/60 border border-zinc-800 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2 text-xs">
-                <span className="text-zinc-400 font-medium">Balanço do elenco:</span>
+                <span className="text-zinc-400 font-medium">Equilíbrio da escalação:</span>
                 <span className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 font-semibold">
                   {poolStats.high} High Elo
                 </span>
@@ -316,75 +398,140 @@ export default function SorteioPage() {
               />
             </div>
 
-            {/* Player Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[380px] overflow-y-auto pr-1">
-              {filteredPlayers.length === 0 ? (
-                <div className="col-span-full text-center py-12 text-zinc-500 text-sm border border-dashed border-zinc-800 rounded-xl">
-                  Nenhum jogador encontrado com esse filtro.
+            {/* Group 1: Players who practice this sport */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <span className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
+                  Jogadores cadastrados em {selectedSport.name} ({filteredSportPlayers.length})
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  Marque quem veio jogar hoje
+                </span>
+              </div>
+
+              {filteredSportPlayers.length === 0 ? (
+                <div className="text-center py-8 text-zinc-500 text-xs border border-dashed border-zinc-800/80 rounded-xl bg-zinc-950/20">
+                  Nenhum jogador cadastrado nesta modalidade ainda. Ative jogadores abaixo ou cadastre um novo!
                 </div>
               ) : (
-                filteredPlayers.map((player) => {
-                  const isSelected = selectedPlayerIds.has(player.id);
-                  const playerElo = player.elos[selectedSport.id] || 'mid';
-                  return (
-                    <div
-                      key={player.id}
-                      onClick={() => togglePlayer(player.id)}
-                      className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
-                        isSelected
-                          ? 'border-violet-500/50 bg-violet-500/10 shadow-sm'
-                          : 'border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700/80 hover:bg-zinc-800/30 opacity-70'
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0 pr-2">
-                        <div
-                          className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
-                            isSelected
-                              ? 'border-violet-500 bg-violet-600 text-white'
-                              : 'border-zinc-700 bg-zinc-800'
-                          }`}
-                        >
-                          {isSelected && (
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              width="12"
-                              height="12"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="3.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
-                          )}
-                        </div>
-                        <span
-                          className={`text-sm font-semibold truncate ${
-                            isSelected ? 'text-zinc-100' : 'text-zinc-400'
-                          }`}
-                        >
-                          {player.name}
-                        </span>
-                      </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[340px] overflow-y-auto pr-1">
+                  {filteredSportPlayers.map((player) => {
+                    const isSelected = selectedPlayerIds.has(player.id);
+                    const playerElo = player.elos[selectedSport.id] || 'mid';
+                    return (
                       <div
-                        onClick={(e) => e.stopPropagation()}
-                        className="shrink-0"
+                        key={player.id}
+                        onClick={() => togglePlayer(player.id)}
+                        className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
+                          isSelected
+                            ? 'border-violet-500/50 bg-violet-500/10 shadow-sm'
+                            : 'border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700/80 hover:bg-zinc-800/30 opacity-70'
+                        }`}
                       >
-                        <EloSelector
-                          value={playerElo}
-                          onChange={(elo) =>
-                            handleUpdatePlayerElo(player.id, elo)
-                          }
-                          size="sm"
-                        />
+                        <div className="flex items-center gap-3 min-w-0 pr-2">
+                          <div
+                            className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all shrink-0 ${
+                              isSelected
+                                ? 'border-violet-500 bg-violet-600 text-white'
+                                : 'border-zinc-700 bg-zinc-800'
+                            }`}
+                          >
+                            {isSelected && (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="3.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </div>
+                          <span
+                            className={`text-sm font-semibold truncate ${
+                              isSelected ? 'text-zinc-100' : 'text-zinc-400'
+                            }`}
+                          >
+                            {player.name}
+                          </span>
+                        </div>
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="shrink-0 flex items-center gap-1.5"
+                        >
+                          <EloSelector
+                            value={playerElo}
+                            onChange={(elo) =>
+                              handleUpdatePlayerElo(player.id, elo)
+                            }
+                            size="sm"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleDisableSportForPlayer(player.id)}
+                            className="text-zinc-600 hover:text-zinc-300 p-1 text-xs"
+                            title="Remover modalidade deste jogador"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               )}
             </div>
+
+            {/* Group 2: Other players who do NOT practice this sport yet */}
+            {nonSportPlayers.length > 0 && (
+              <div className="mt-4 border-t border-zinc-800/60 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowOtherPlayers(!showOtherPlayers)}
+                  className="flex items-center justify-between w-full px-2 py-1.5 text-xs font-semibold text-zinc-400 hover:text-zinc-200 transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <span>{showOtherPlayers ? '▼' : '▶'}</span>
+                    <span>
+                      Outros cadastrados que não jogam {selectedSport.name} ({filteredNonSportPlayers.length})
+                    </span>
+                  </span>
+                  <span className="text-[11px] text-violet-400 underline">
+                    {showOtherPlayers ? 'Ocultar' : 'Exibir para habilitar'}
+                  </span>
+                </button>
+
+                {showOtherPlayers && (
+                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-56 overflow-y-auto pr-1">
+                    {filteredNonSportPlayers.map((player) => (
+                      <div
+                        key={player.id}
+                        className="flex items-center justify-between p-2.5 rounded-xl border border-zinc-800/60 bg-zinc-950/40"
+                      >
+                        <span className="text-xs font-medium text-zinc-400 truncate pr-2">
+                          {player.name}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => handleEnableSportForPlayer(player, 'mid')}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-violet-500/15 border border-violet-500/30 text-violet-300 hover:bg-violet-500/25 transition-all cursor-pointer"
+                            title={`Adicionar ${player.name} em ${selectedSport.name}`}
+                          >
+                            + Habilitar & Escalar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
           {/* Step 3: Draw action */}
@@ -430,7 +577,7 @@ export default function SorteioPage() {
                   type="button"
                   onClick={handleSortear}
                   className="px-4 py-3 rounded-xl font-semibold text-sm border border-zinc-700 hover:bg-zinc-800 text-zinc-300 transition-colors flex items-center gap-1.5 cursor-pointer"
-                  title="Sortear novamente com outra combinação"
+                  title="Sortear novamente com outra combinação justa"
                 >
                   <span>🔄</span> Re-sortear
                 </button>
@@ -528,7 +675,6 @@ export default function SorteioPage() {
               type="text"
               value={newPlayerName}
               onChange={(e) => setNewPlayerName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddQuickPlayer()}
               placeholder="Ex: Gabriel, Pedro, Mariana..."
               autoFocus
               className="w-full px-4 py-2.5 rounded-xl bg-zinc-800/90 border border-zinc-700 text-zinc-100 text-sm placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
@@ -536,17 +682,13 @@ export default function SorteioPage() {
           </div>
 
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-              Nível em {selectedSport?.name || 'este esporte'}
-            </label>
-            <EloSelector
-              value={newPlayerElo}
-              onChange={setNewPlayerElo}
-              size="md"
+            <SportEloPicker
+              elos={newPlayerElos}
+              onChange={setNewPlayerElos}
             />
           </div>
 
-          <div className="flex gap-2.5 pt-3">
+          <div className="flex gap-2.5 pt-3 border-t border-zinc-800">
             <button
               type="button"
               onClick={() => setShowAddModal(false)}
@@ -556,11 +698,11 @@ export default function SorteioPage() {
             </button>
             <button
               type="button"
-              onClick={handleAddQuickPlayer}
-              disabled={!newPlayerName.trim()}
+              onClick={handleAddPlayer}
+              disabled={!newNamePlayerTrimmed}
               className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
             >
-              Adicionar ao Jogo
+              Cadastrar Jogador
             </button>
           </div>
         </div>

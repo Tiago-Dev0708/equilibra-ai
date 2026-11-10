@@ -26,6 +26,14 @@ export function savePlayers(players: Player[]): void {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(players));
+    // Asynchronously update file on disk via API route for local development persistence
+    fetch('/api/players', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(players),
+    }).catch(() => {
+      // Ignored if in read-only environment
+    });
   } catch (err) {
     console.error('Error saving players to localStorage', err);
   }
