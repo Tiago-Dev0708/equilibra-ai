@@ -1,22 +1,35 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
-import "./globals.css";
-import Header from "@/components/Header";
+import type { Metadata, Viewport } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
+import './globals.css';
+import Header from '@/components/Header';
+import { LogoMark } from '@/components/Logo';
+import { themeInitScript } from '@/components/ThemeToggle';
 
 const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+  variable: '--font-geist-sans',
+  subsets: ['latin'],
 });
 
 const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  variable: '--font-geist-mono',
+  subsets: ['latin'],
 });
 
 export const metadata: Metadata = {
-  title: "Equilibra.ai — Sorteio de Times Equilibrados",
+  title: {
+    default: 'Equilibra · Sorteio de times equilibrados',
+    template: '%s · Equilibra',
+  },
   description:
-    "Monte times equilibrados para qualquer esporte. Sorteio inteligente baseado no Elo dos jogadores.",
+    'Monte times equilibrados para futebol, vôlei, basquete e outras modalidades a partir do nível de cada jogador.',
+  applicationName: 'Equilibra',
+};
+
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#fafaf9' },
+    { media: '(prefers-color-scheme: dark)', color: '#0c0a09' },
+  ],
 };
 
 export default function RootLayout({
@@ -27,19 +40,22 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-950 text-zinc-100 selection:bg-violet-500/30 selection:text-violet-200">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
+      <body className="flex min-h-full flex-col bg-canvas text-fg">
         <Header />
-        <main className="flex-1 pb-16">{children}</main>
-        <footer className="border-t border-zinc-900 bg-zinc-950/60 py-6 text-center text-xs text-zinc-600">
-          <div className="max-w-5xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <span className="font-medium text-zinc-500">
-              Equilibra<span className="text-violet-400">.ai</span> • Sorteio inteligente e justo para esportes
+        <main className="flex-1">{children}</main>
+        <footer className="border-t border-line">
+          <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 text-xs text-faint sm:px-6">
+            <span className="flex items-center gap-2">
+              <LogoMark size={16} />
+              Equilibra
             </span>
-            <span className="text-zinc-600">
-              Otimizado para até 100 jogadores • Vercel Ready
-            </span>
+            <span className="hidden sm:inline">Times equilibrados pelo nível de cada jogador</span>
           </div>
         </footer>
       </body>

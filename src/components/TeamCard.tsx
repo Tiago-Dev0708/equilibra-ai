@@ -1,150 +1,116 @@
 'use client';
 
 import { Team } from '@/lib/types';
-import { getEloShortLabel, getEloBgColor } from '@/lib/balancer';
+import { LEVELS, LEVEL_LABEL } from '@/lib/levels';
+import { POSITION_LABEL, RoleRequirement, missingRoles, positionCount } from '@/lib/positions';
+import { LevelDot, LevelTag } from './Level';
+
+/** Cores de colete para identificar cada time. */
+export const TEAM_COLORS = ['#2563eb', '#ea580c', '#16a34a', '#9333ea', '#db2777', '#0891b2'];
+
+export function teamLabel(index: number) {
+  return `Time ${String.fromCharCode(65 + index)}`;
+}
 
 interface TeamCardProps {
   team: Team;
   index: number;
-  totalTeams?: number;
-  onMovePlayer?: (fromTeamIndex: number, playerIndex: number, toTeamIndex: number) => void;
+  totalTeams: number;
+  onMovePlayer?: (fromTeam: number, playerIndex: number, toTeam: number) => void;
+  /** Posições mínimas por time (vôlei). */
+  requirements?: RoleRequirement[];
 }
-
-const TEAM_THEMES = [
-  {
-    bg: 'from-violet-500/10 via-zinc-900 to-zinc-900',
-    border: 'border-violet-500/30',
-    accent: 'text-violet-400',
-    badge: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
-  },
-  {
-    bg: 'from-emerald-500/10 via-zinc-900 to-zinc-900',
-    border: 'border-emerald-500/30',
-    accent: 'text-emerald-400',
-    badge: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-  },
-  {
-    bg: 'from-amber-500/10 via-zinc-900 to-zinc-900',
-    border: 'border-amber-500/30',
-    accent: 'text-amber-400',
-    badge: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  },
-  {
-    bg: 'from-cyan-500/10 via-zinc-900 to-zinc-900',
-    border: 'border-cyan-500/30',
-    accent: 'text-cyan-400',
-    badge: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
-  },
-  {
-    bg: 'from-rose-500/10 via-zinc-900 to-zinc-900',
-    border: 'border-rose-500/30',
-    accent: 'text-rose-400',
-    badge: 'bg-rose-500/20 text-rose-300 border-rose-500/30',
-  },
-  {
-    bg: 'from-fuchsia-500/10 via-zinc-900 to-zinc-900',
-    border: 'border-fuchsia-500/30',
-    accent: 'text-fuchsia-400',
-    badge: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/30',
-  },
-];
 
 export default function TeamCard({
   team,
   index,
-  totalTeams = 0,
+  totalTeams,
   onMovePlayer,
+  requirements = [],
 }: TeamCardProps) {
-  const theme = TEAM_THEMES[index % TEAM_THEMES.length];
-  const highCount = team.players.filter((p) => p.elo === 'high').length;
-  const midCount = team.players.filter((p) => p.elo === 'mid').length;
-  const lowCount = team.players.filter((p) => p.elo === 'low').length;
+  const missing = missingRoles(team, requirements);
+  const color = TEAM_COLORS[index % TEAM_COLORS.length];
+  const counts = LEVELS.map((level) => ({
+    level,
+    count: team.players.filter((p) => p.elo === level).length,
+  })).filter((c) => c.count > 0);
 
   return (
-    <div
-      className={`rounded-2xl border bg-gradient-to-b ${theme.bg} ${theme.border} p-5 shadow-xl transition-all`}
-    >
-      <div className="flex items-center justify-between mb-4 border-b border-zinc-800/80 pb-3">
-        <div>
-          <h3 className={`font-bold text-lg tracking-tight ${theme.accent}`}>
-            Time {String.fromCharCode(65 + index)}
-          </h3>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            {team.players.length} jogadores
-          </p>
+    <article className="card flex flex-col overflow-hidden">
+      <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <div className="flex items-center gap-2.5">
+          <span aria-hidden="true" className="size-3 rounded-[3px]" style={{ background: color }} />
+          <h3 className="text-sm font-semibold text-fg">{teamLabel(index)}</h3>
+          <span className="text-xs text-faint">{team.players.length} jogadores</span>
         </div>
         <div className="text-right">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-zinc-500 uppercase tracking-wider font-semibold">
-              Força
-            </span>
-            <span className={`text-base font-extrabold ${theme.accent}`}>
-              {team.totalScore} pts
-            </span>
-          </div>
-          <div className="flex items-center gap-1 text-[11px] text-zinc-400 mt-0.5 justify-end">
-            {highCount > 0 && <span className="text-emerald-400">{highCount}H</span>}
-            {midCount > 0 && <span className="text-amber-400">{midCount}M</span>}
-            {lowCount > 0 && <span className="text-sky-400">{lowCount}L</span>}
-          </div>
+          <span className="font-mono text-sm font-medium text-fg tabular-nums">{team.totalScore}</span>
+          <span className="ml-1 text-xs text-faint">pts</span>
         </div>
-      </div>
+      </header>
 
-      <div className="space-y-2">
+      <ol className="flex-1 divide-y divide-line">
         {team.players.map((player, pIdx) => (
-          <div
-            key={player.id}
-            className="flex items-center justify-between bg-zinc-950/60 border border-zinc-800/60 rounded-xl px-3.5 py-2.5 transition-colors hover:border-zinc-700/60 group"
-          >
-            <div className="flex items-center gap-2.5 truncate pr-2">
-              <span className="text-xs text-zinc-500 font-mono w-4 shrink-0">
-                {pIdx + 1}.
+          <li key={player.id} className="flex items-center justify-between gap-2 px-4 py-2">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="w-4 shrink-0 text-right font-mono text-xs text-faint tabular-nums">
+                {pIdx + 1}
               </span>
-              <span className="text-sm text-zinc-200 font-medium truncate">
-                {player.name}
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-fg">{player.name}</span>
+                {requirements.length > 0 && (
+                  <span className="block text-xs text-faint">
+                    {player.position ? POSITION_LABEL[player.position] : 'Sem posição'}
+                  </span>
+                )}
               </span>
             </div>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span
-                className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${getEloBgColor(
-                  player.elo
-                )}`}
-              >
-                {getEloShortLabel(player.elo)}
-              </span>
-
-              {/* Move player dropdown if there are multiple teams */}
+            <div className="flex shrink-0 items-center gap-2">
+              <LevelTag level={player.elo} />
               {totalTeams > 1 && onMovePlayer && (
                 <select
-                  defaultValue=""
+                  value=""
                   onChange={(e) => {
                     const target = Number(e.target.value);
-                    if (!isNaN(target)) {
-                      onMovePlayer(index, pIdx, target);
-                    }
-                    e.target.value = '';
+                    if (!Number.isNaN(target)) onMovePlayer(index, pIdx, target);
                   }}
-                  className="bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-500 hover:text-zinc-300 rounded px-1 py-0.5 focus:outline-none cursor-pointer"
-                  title="Mover este jogador para outro time"
+                  aria-label={`Mover ${player.name} para outro time`}
+                  className="h-7 cursor-pointer rounded-md border border-line bg-surface px-1.5 text-xs text-muted transition-colors hover:border-line-strong hover:text-fg focus:border-accent focus:outline-none"
                 >
                   <option value="" disabled>
-                    ⇄ Mover
+                    Mover
                   </option>
-                  {Array.from({ length: totalTeams }).map((_, tIdx) => {
-                    if (tIdx === index) return null;
-                    return (
+                  {Array.from({ length: totalTeams }, (_, tIdx) =>
+                    tIdx === index ? null : (
                       <option key={tIdx} value={tIdx}>
-                        Para Time {String.fromCharCode(65 + tIdx)}
+                        {teamLabel(tIdx)}
                       </option>
-                    );
-                  })}
+                    )
+                  )}
                 </select>
               )}
             </div>
-          </div>
+          </li>
         ))}
-      </div>
-    </div>
+      </ol>
+
+      {counts.length > 0 && (
+        <footer className="space-y-1.5 border-t border-line bg-subtle/40 px-4 py-2.5">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {counts.map(({ level, count }) => (
+              <span key={level} className="inline-flex items-center gap-1.5 text-xs text-muted">
+                <LevelDot level={level} />
+                {count} {LEVEL_LABEL[level].toLowerCase()}
+              </span>
+            ))}
+          </div>
+          {missing.length > 0 && (
+            <p className="text-xs font-medium text-warning">
+              Falta {missing.map((m) => positionCount(m.missing, m.position)).join(' e ')}
+            </p>
+          )}
+        </footer>
+      )}
+    </article>
   );
 }

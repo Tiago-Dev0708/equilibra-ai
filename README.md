@@ -1,90 +1,52 @@
-# ⚖️ Equilibra.ai — Sorteador de Times Equilibrados por Elo
+# Equilibra
 
-O **Equilibra.ai** é uma aplicação web moderna e minimalista para sorteio justo de times em diversas modalidades esportivas. O algoritmo distribui os jogadores balanceando a pontuação técnica (High Elo, Mid Elo, Low Elo) e a quantidade de jogadores em cada equipe.
+Sorteio de times equilibrados para jogos entre amigos. Cada jogador tem um nível por modalidade (Alto, Médio ou Baixo) e o sorteio distribui o grupo de forma que a diferença de força entre os times seja a menor possível.
 
-Desenvolvido exclusivamente com **Next.js 16**, **Tailwind CSS 4** e **TypeScript**.
+Feito com Next.js 16, React 19, Tailwind CSS 4 e TypeScript.
 
----
+## Funcionalidades
 
-## 🚀 Funcionalidades
+- **10 modalidades**: Futebol Society, Futsal, Futebol de Campo, Vôlei de Praia, Vôlei Quarteto, Vôlei de Quadra, Basquete, Basquete 3x3, Beach Tennis e Handebol.
+- **Nível por modalidade**: cada jogador só aparece nas modalidades que pratica. Alto = 3, Médio = 2 e Baixo = 1 ponto.
+- **Posições no vôlei (quarteto e sexteto)**: levantador, ponteiro, central, oposto ou líbero. O sorteio garante ao menos 1 levantador e 2 ponteiros por time e avisa quando faltam jogadores nessas posições.
+- **Sorteio equilibrado**: várias tentativas embaralhadas, mantendo a de menor diferença de pontos e com os jogadores de nível alto espalhados entre os times. Depois do sorteio, dá para mover jogadores entre os times manualmente.
+- **Lista do WhatsApp**: cole a lista de confirmados (`1. Tiago`, `2 - Lucas`). Numeração e emojis são removidos, quem já está cadastrado é escalado e quem não está é criado.
+- **Compartilhar**: copia os times formatados para colar no grupo.
+- **Tema claro e escuro**: segue o sistema e pode ser alternado no topo da página.
 
-- **Modalidades Esportivas Pré-configuradas**:
-  - ⚽ Futebol Society (6x6)
-  - 👟 Futsal (5x5)
-  - ⚽ Futebol de Campo (11x11)
-  - 🏖️ Vôlei de Praia (Dupla Mista - 2x2)
-  - 🏐 Vôlei (Quarteto Misto - 4x4)
-  - 🏐 Vôlei de Quadra (Sexteto Misto - 6x6)
-  - 🏀 Basquete (5x5) e Basquete 3x3
-  - 🎾 Beach Tennis (Dupla - 2x2)
-  - 🤾 Handebol (7x7)
+## Persistência dos dados
 
-- **Elo Individual por Esporte**:
-  - **High Elo (Craque)**: 3 pontos
-  - **Mid Elo (Mediano)**: 2 pontos
-  - **Low Elo (Iniciante)**: 1 ponto
-  - Cada jogador só tem ativos os esportes que ele **realmente pratica** (não fica tudo marcado como Mid).
+A lista de jogadores fica salva em um banco **Upstash Redis** conectado ao projeto pela própria Vercel, compartilhado entre todos os dispositivos que acessam o link.
 
-- **Sorteio Balanceado por Algoritmo**:
-  - Snake draft com otimização Monte Carlo para garantir diferença mínima de força entre os times.
-  - Distribuição uniforme dos jogadores de High Elo.
-  - Diagnóstico de força dos times em tempo real.
-  - Opção de remanejar jogadores manualmente entre os times após o sorteio com 1 clique.
+| Ambiente | Onde salva |
+| --- | --- |
+| Vercel com Redis conectado | Upstash Redis |
+| `npm run dev` sem variáveis | `.data/players.json` (ignorado pelo git) |
+| Vercel sem banco | Somente no navegador de cada pessoa |
 
-- **Importação Direta do WhatsApp**:
-  - Botão **"Colar do WhatsApp"**: cole a lista de confirmados (`1. Tiago`, `2 - Lucas`) e o sistema limpa os números, localiza os jogadores existentes ou cadastra os novos automaticamente.
+`src/data/players.json` é a lista inicial, usada enquanto o banco ainda não tem nada salvo.
 
-- **Compartilhamento**:
-  - Botão **"Copiar para WhatsApp"**: formata os times com emojis pronto para colar no grupo.
+## Deploy na Vercel
 
----
+1. Em [vercel.com/new](https://vercel.com/new), importe o repositório `equilibra-ai` e clique em **Deploy**. A Vercel detecta o Next.js automaticamente.
+2. No projeto, abra **Storage** > **Create Database** > **Upstash for Redis** (plano gratuito) e conecte ao projeto, marcando todos os ambientes.
+3. A Vercel cria as variáveis `KV_REST_API_URL` e `KV_REST_API_TOKEN`. O app também aceita `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`.
+4. Faça um novo deploy (**Deployments** > **Redeploy**) para o app passar a usar o banco.
 
-## ☁️ Como funciona a Persistência na Vercel (Sem precisar de git push manual)
+O indicador ao lado da lista mostra **Sincronizado** quando o banco está ativo.
 
-Em ambientes Serverless como a Vercel, o sistema de arquivos da máquina é somente-leitura. O **Equilibra.ai** possui suporte nativo a duas formas de sincronização permanente na nuvem:
+> A API de gravação não tem autenticação: qualquer pessoa com o link pode editar a lista. Para um grupo de amigos isso costuma bastar.
 
-### Opção 1: Vercel KV / Upstash Redis (Recomendado — 1 Clique na Vercel)
-1. No painel do seu projeto na [Vercel](https://vercel.com):
-2. Clique na aba **Storage** → **Connect Database** → **KV (Upstash)**.
-3. A Vercel conecta as variáveis `KV_REST_API_URL` e `KV_REST_API_TOKEN` automaticamente.
-4. Pronto! Qualquer alteração de jogadores feita de qualquer celular ou computador é salva e sincronizada na nuvem instantaneamente.
-
-### Opção 2: Commit Automático no seu GitHub
-Se você prefere que o próprio arquivo `src/data/players.json` no seu repositório seja commitado a cada alteração:
-1. Crie um **Personal Access Token** no GitHub (com permissão `repo` / `contents:write`).
-2. Adicione 2 variáveis de ambiente no projeto da Vercel:
-   - `GITHUB_TOKEN`: seu token do GitHub
-   - `GITHUB_REPO`: `seu-usuario/seu-repositorio` (ex: `tiago/equilibra-ai`)
-3. A cada alteração feita na interface, a API do app faz o commit direto no seu repositório!
-
----
-
-## 💻 Executando Localmente
+## Rodando localmente
 
 ```bash
-# Instalar dependências
 npm install
-
-# Rodar servidor de desenvolvimento
 npm run dev
-
-# Acesse no navegador
-http://localhost:3000
 ```
 
----
-
-## 📦 Como Subir no GitHub e Deployar na Vercel
+Acesse http://localhost:3000. Para usar o mesmo banco da produção:
 
 ```bash
-# 1. Crie o repositório no seu GitHub (público)
-# 2. Adicione o remote e envie:
-git remote add origin https://github.com/SEU_USUARIO/equilibra-ai.git
-git branch -M main
-git push -u origin main
+npx vercel link
+npx vercel env pull .env.local
 ```
-
-Na [Vercel](https://vercel.com):
-1. Clique em **"Add New..."** → **"Project"**.
-2. Importe o repositório `equilibra-ai`.
-3. Clique em **"Deploy"** (a Vercel detecta Next.js automaticamente).

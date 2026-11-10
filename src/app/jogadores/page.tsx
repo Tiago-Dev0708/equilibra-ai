@@ -1,597 +1,433 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Player, Elo } from '@/lib/types';
+import { useMemo, useState } from 'react';
+import { Elo, Player } from '@/lib/types';
 import { SPORTS } from '@/lib/sports';
-import {
-  loadPlayers,
-  syncPlayersFromServer,
-  savePlayers,
-  exportPlayersJSON,
-  importPlayersJSON,
-  generateId,
-} from '@/lib/storage';
-import { getEloShortLabel, getEloBgColor } from '@/lib/balancer';
-import defaultPlayersData from '@/data/players.json';
-import SportEloPicker from '@/components/SportEloPicker';
+import { LEVEL_LABEL } from '@/lib/levels';
+import { exportPlayersJSON, generateId, importPlayersJSON } from '@/lib/storage';
+import { MAX_NAME_LENGTH } from '@/lib/validate';
+import { usePlayers } from '@/lib/usePlayers';
+import SportLevelPicker from '@/components/SportLevelPicker';
+import SportIcon from '@/components/icons/SportIcon';
 import Modal from '@/components/Modal';
+import SyncStatus from '@/components/SyncStatus';
+import { LevelDot } from '@/components/Level';
+import PositionSelect from '@/components/PositionSelect';
+import { POSITION_LABEL, VolleyPosition } from '@/lib/positions';
+import {
+  IconDownload,
+  IconPencil,
+  IconPlus,
+  IconSearch,
+  IconTrash,
+  IconUpload,
+  IconUsers,
+} from '@/components/icons/ui';
+
+const normalize = (s: string) =>
+  s
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .trim();
 
 export default function JogadoresPage() {
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSportFilter, setSelectedSportFilter] = useState<string>('all');
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [showCloudModal, setShowCloudModal] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<string | null>(null);
-  const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
-  const [newName, setNewName] = useState('');
-  const [newElos, setNewElos] = useState<Record<string, Elo>>({});
-  const [showImportModal, setShowImportModal] = useState(false);
+  const { players, ready, save, storage, sync } = usePlayers();
+
+  const [search, setSearch] = useState('');
+  const [sportFilter, setSportFilter] = useState('all');
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [formName, setFormName] = useState('');
+  const [formElos, setFormElos] = useState<Record<string, Elo>>({});
+  const [formPosition, setFormPosition] = useState<VolleyPosition | undefined>(undefined);
+  const formPlaysPositionSport = SPORTS.some((s) => s.hasPositions && formElos[s.id] !== undefined);
+
+  const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    // 1. Load locally immediately
-    setPlayers(loadPlayers());
+  const filtered = useMemo(() => {
+    const q = normalize(search);
+    return players
+      .filter((p) => (q ? normalize(p.name).includes(q) : true))
+      .filter((p) => (sportFilter === 'all' ? true : p.elos[sportFilter] !== undefined))
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [players, search, sportFilter]);
 
-    // 2. Sync from server (Vercel KV, GitHub or local API)
-    syncPlayersFromServer().then((remote) => {
-      if (remote && remote.length > 0) {
-        setPlayers(remote);
-      }
-    });
-  }, []);
+  const openCreate = () => {
+    setEditingId(null);
+    setFormName('');
+    setFormElos({});
+    setFormPosition(undefined);
+    setEditorOpen(true);
+  };
 
-  const triggerSave = useCallback(async (updated: Player[]) => {
-    setPlayers(updated);
-    const result = await savePlayers(updated);
-    if (result.message) {
-      setSaveStatus(result.message);
-      setTimeout(() => setSaveStatus(null), 3500);
+  const openEdit = (player: Player) => {
+    setEditingId(player.id);
+    setFormName(player.name);
+    setFormElos({ ...player.elos });
+    setFormPosition(player.volleyPosition);
+    setEditorOpen(true);
+  };
+
+  const handleSubmit = () => {
+    const name = formName.trim();
+    if (!name) return;
+    const volleyPosition = formPlaysPositionSport ? formPosition : undefined;
+    if (editingId) {
+      save(
+        players.map((p) =>
+          p.id === editingId ? { ...p, name, elos: { ...formElos }, volleyPosition } : p
+        )
+      );
+    } else {
+      save([{ id: generateId(), name, elos: { ...formElos }, volleyPosition }, ...players]);
     }
-  }, []);
+    setEditorOpen(false);
+  };
 
-  const filteredPlayers = players.filter((p) => {
-    const matchesSearch = p.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
-    if (!matchesSearch) return false;
-    if (selectedSportFilter === 'all') return true;
-    return p.elos[selectedSportFilter] !== undefined;
-  });
+  const handleDelete = (id: string) => {
+    save(players.filter((p) => p.id !== id));
+    setDeleteConfirm(null);
+  };
 
-  const handleAdd = useCallback(() => {
-    if (!newName.trim()) return;
-    const player: Player = {
-      id: generateId(),
-      name: newName.trim(),
-      elos: { ...newElos },
-    };
-    const updated = [player, ...players];
-    triggerSave(updated);
-    setNewName('');
-    setNewElos({});
-    setShowAddModal(false);
-  }, [newName, newElos, players, triggerSave]);
-
-  const handleEdit = useCallback(() => {
-    if (!editingPlayer || !newName.trim()) return;
-    const updated = players.map((p) =>
-      p.id === editingPlayer.id
-        ? { ...p, name: newName.trim(), elos: { ...newElos } }
-        : p
-    );
-    triggerSave(updated);
-    setEditingPlayer(null);
-    setNewName('');
-    setNewElos({});
-  }, [editingPlayer, newName, newElos, players, triggerSave]);
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      const updated = players.filter((p) => p.id !== id);
-      triggerSave(updated);
-      setDeleteConfirm(null);
-    },
-    [players, triggerSave]
-  );
-
-  const openEdit = useCallback((player: Player) => {
-    setEditingPlayer(player);
-    setNewName(player.name);
-    setNewElos({ ...player.elos });
-  }, []);
-
-  const handleExport = useCallback(() => {
-    const json = exportPlayersJSON(players);
-    const blob = new Blob([json], { type: 'application/json' });
+  const handleExport = () => {
+    const blob = new Blob([exportPlayersJSON(players)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'players.json';
+    a.download = `jogadores-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [players]);
+  };
 
-  const handleRestoreDefaults = useCallback(() => {
-    if (confirm('Deseja restaurar a lista padrão com jogadores de exemplo?')) {
-      const defaults = defaultPlayersData as Player[];
-      triggerSave(defaults);
-    }
-  }, [triggerSave]);
-
-  const handleImport = useCallback(() => {
-    const imported = importPlayersJSON(importText);
-    if (!imported || imported.length === 0) {
-      setImportError('JSON inválido ou vazio. Formato esperado: array de jogadores com id, name e elos.');
-      return;
-    }
-    const existingNames = new Set(players.map((p) => p.name.toLowerCase()));
-    const newOnes = imported.filter((p) => !existingNames.has(p.name.toLowerCase()));
-    const updated = [...players, ...newOnes];
-    triggerSave(updated);
-    setShowImportModal(false);
+  const closeImport = () => {
+    setImportOpen(false);
     setImportText('');
     setImportError('');
-  }, [importText, players, triggerSave]);
+  };
 
-  const handleFileImport = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const text = event.target?.result as string;
-        setImportText(text);
-      };
-      reader.readAsText(file);
-    },
-    []
-  );
+  const handleImport = () => {
+    const imported = importPlayersJSON(importText);
+    if (!imported || imported.length === 0) {
+      setImportError('Arquivo inválido. O formato esperado é uma lista de jogadores com id, name e elos.');
+      return;
+    }
+    const existingNames = new Set(players.map((p) => normalize(p.name)));
+    const existingIds = new Set(players.map((p) => p.id));
+    const additions = imported
+      .filter((p) => !existingNames.has(normalize(p.name)))
+      .map((p) => (existingIds.has(p.id) ? { ...p, id: generateId() } : p));
+    save([...players, ...additions]);
+    closeImport();
+  };
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setImportText(String(event.target?.result ?? ''));
+      setImportError('');
+    };
+    reader.readAsText(file);
+  };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      {/* Toast Notification */}
-      {saveStatus && (
-        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl bg-zinc-900 border border-violet-500/40 text-violet-300 text-xs font-semibold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
-          <span>✓</span>
-          <span>{saveStatus}</span>
-        </div>
-      )}
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+    <div className="mx-auto max-w-5xl px-4 pt-8 pb-16 sm:px-6 sm:pt-10">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-2xl sm:text-3xl font-extrabold text-zinc-100 tracking-tight">
-              Gerenciar Jogadores
-            </h1>
-            <span className="px-2.5 py-0.5 rounded-full bg-violet-500/20 text-violet-300 border border-violet-500/30 text-xs font-semibold">
-              {players.length} cadastrados
-            </span>
-          </div>
-          <p className="text-xs sm:text-sm text-zinc-400 mt-1">
-            Defina exatamente quais esportes cada jogador pratica e o seu nível específico em cada um.
+          <h1 className="flex items-baseline gap-2.5 text-2xl font-semibold tracking-tight text-fg">
+            Jogadores
+            {ready && <span className="text-base font-normal text-faint tabular-nums">{players.length}</span>}
+          </h1>
+          <p className="mt-1.5 max-w-xl text-sm text-muted">
+            Cadastre quem joga e o nível de cada um em cada modalidade.
           </p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowCloudModal(true)}
-            className="px-3.5 py-2 rounded-xl border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-            title="Ver opções de sincronização na Vercel e nuvem"
-          >
-            <span>☁️</span> Nuvem & Vercel
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="btn btn-secondary" onClick={() => setImportOpen(true)}>
+            <IconUpload />
+            Importar
           </button>
           <button
             type="button"
-            onClick={() => setShowImportModal(true)}
-            className="px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
-            title="Importar arquivo JSON de jogadores"
-          >
-            <span>📥</span> Importar
-          </button>
-          <button
-            type="button"
+            className="btn btn-secondary"
             onClick={handleExport}
             disabled={players.length === 0}
-            className="px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
-            title="Baixar arquivo JSON para backup"
           >
-            <span>📤</span> Salvar JSON
+            <IconDownload />
+            Exportar
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setNewName('');
-              setNewElos({});
-              setShowAddModal(true);
-            }}
-            className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-all shadow-lg shadow-violet-600/25 flex items-center gap-1.5 cursor-pointer"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Novo Jogador
+          <button type="button" className="btn btn-primary" onClick={openCreate}>
+            <IconPlus />
+            Novo jogador
           </button>
         </div>
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="flex flex-col sm:flex-row gap-2.5 mb-6">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
         <div className="relative flex-1">
-          <svg
-            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500"
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.3-4.3" />
-          </svg>
+          <IconSearch className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-faint" />
           <input
-            type="text"
-            placeholder="Buscar jogador por nome..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-zinc-900/90 border border-zinc-800 text-zinc-100 text-sm placeholder:text-zinc-600 focus:outline-none focus:border-violet-500/60 focus:ring-1 focus:ring-violet-500/20 transition-all"
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nome"
+            aria-label="Buscar por nome"
+            className="input pl-9"
           />
         </div>
-
         <select
-          value={selectedSportFilter}
-          onChange={(e) => setSelectedSportFilter(e.target.value)}
-          className="bg-zinc-900/90 border border-zinc-800 text-zinc-300 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-violet-500"
+          value={sportFilter}
+          onChange={(e) => setSportFilter(e.target.value)}
+          aria-label="Filtrar por modalidade"
+          className="select sm:w-60"
         >
           <option value="all">Todas as modalidades</option>
           {SPORTS.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.emoji} Praticantes de {s.name}
+              {s.name}
             </option>
           ))}
         </select>
       </div>
 
-      {/* Players List */}
-      {filteredPlayers.length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-zinc-800 rounded-2xl p-8">
-          <div className="text-4xl mb-3">👥</div>
-          <p className="text-zinc-400 text-sm font-medium">
-            {players.length === 0
-              ? 'Nenhum jogador cadastrado no momento.'
-              : 'Nenhum jogador encontrado para os filtros selecionados.'}
-          </p>
-          <div className="flex items-center justify-center gap-3 mt-4">
-            <button
-              type="button"
-              onClick={() => {
-                setNewName('');
-                setNewElos({});
-                setShowAddModal(true);
-              }}
-              className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-all cursor-pointer"
-            >
-              Cadastrar Jogador
-            </button>
+      <div className="mb-3 flex justify-end">
+        <SyncStatus storage={storage} sync={sync} />
+      </div>
+
+      <div className="card overflow-hidden">
+        {!ready ? (
+          <div className="space-y-2 p-4" aria-busy="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="h-12 animate-pulse rounded-md bg-subtle" />
+            ))}
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center px-6 py-14 text-center">
+            <span className="mb-4 flex size-10 items-center justify-center rounded-full bg-subtle text-muted">
+              <IconUsers size={20} />
+            </span>
+            <p className="text-sm font-medium text-fg">
+              {players.length === 0 ? 'Nenhum jogador cadastrado' : 'Nenhum jogador encontrado'}
+            </p>
+            <p className="mt-1 text-sm text-muted">
+              {players.length === 0
+                ? 'Cadastre o primeiro jogador ou importe uma lista salva.'
+                : 'Ajuste a busca ou o filtro de modalidade.'}
+            </p>
             {players.length === 0 && (
-              <button
-                type="button"
-                onClick={handleRestoreDefaults}
-                className="px-4 py-2 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 text-xs font-medium transition-all cursor-pointer"
-              >
-                Carregar Jogadores de Exemplo
+              <button type="button" className="btn btn-primary btn-sm mt-5" onClick={openCreate}>
+                <IconPlus size={15} />
+                Novo jogador
               </button>
             )}
           </div>
-        </div>
-      ) : (
-        <div className="space-y-2.5">
-          {filteredPlayers.map((player) => {
-            const eloEntries = Object.entries(player.elos);
-            return (
-              <div
-                key={player.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-xl border border-zinc-800/80 bg-zinc-900/40 hover:border-zinc-700 hover:bg-zinc-900/70 transition-all gap-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="font-bold text-sm sm:text-base text-zinc-100">
-                      {player.name}
-                    </span>
-                    <span className="text-[11px] text-zinc-500 font-mono">
-                      {eloEntries.length === 0
-                        ? 'Nenhum esporte marcado'
-                        : `${eloEntries.length} ${eloEntries.length === 1 ? 'esporte' : 'esportes'}`}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5">
-                    {eloEntries.map(([sportId, elo]) => {
-                      const sport = SPORTS.find((s) => s.id === sportId);
-                      if (!sport) return null;
-                      return (
-                        <span
-                          key={sportId}
-                          className={`inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-0.5 rounded-md border ${getEloBgColor(
-                            elo
-                          )}`}
-                          title={`${sport.name}: ${getEloShortLabel(elo)}`}
-                        >
-                          <span>{sport.emoji}</span>
-                          <span>{sport.name.split(' ')[0]}</span>
-                          <span className="opacity-75">• {getEloShortLabel(elo)}</span>
+        ) : (
+          <ul className="divide-y divide-line">
+            {filtered.map((player) => {
+              const entries = SPORTS.filter((s) => player.elos[s.id] !== undefined).map((s) => ({
+                sport: s,
+                level: player.elos[s.id],
+              }));
+              const confirming = deleteConfirm === player.id;
+              return (
+                <li
+                  key={player.id}
+                  className="flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="flex items-baseline gap-2 text-sm font-medium text-fg">
+                      <span className="truncate">{player.name}</span>
+                      {player.volleyPosition && (
+                        <span className="shrink-0 text-xs font-normal text-faint">
+                          {POSITION_LABEL[player.volleyPosition]}
                         </span>
-                      );
-                    })}
-                    {eloEntries.length === 0 && (
-                      <span className="text-xs text-amber-400/80 italic">
-                        ⚠️ Não joga nenhuma modalidade ainda (clique em editar para ativar)
-                      </span>
+                      )}
+                    </p>
+                    {entries.length === 0 ? (
+                      <p className="mt-1 text-xs text-faint">Nenhuma modalidade definida</p>
+                    ) : (
+                      <ul className="mt-2 flex flex-wrap gap-1.5" aria-label={`Modalidades de ${player.name}`}>
+                        {entries.map(({ sport, level }) => (
+                          <li
+                            key={sport.id}
+                            title={`${sport.name}: nível ${LEVEL_LABEL[level].toLowerCase()}`}
+                            className="inline-flex items-center gap-1.5 rounded-md border border-line bg-subtle/60 py-0.5 pr-2 pl-1.5 text-xs text-muted"
+                          >
+                            <SportIcon sportId={sport.id} size={14} className="text-fg" />
+                            {sport.shortName}
+                            <LevelDot level={level} />
+                          </li>
+                        ))}
+                      </ul>
                     )}
                   </div>
-                </div>
 
-                <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => openEdit(player)}
-                    className="p-2 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all cursor-pointer"
-                    title="Editar Modalidades e Elos"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                    </svg>
-                  </button>
+                  <div className="flex shrink-0 items-center gap-1 self-end sm:self-center">
+                    {confirming ? (
+                      <>
+                        <span className="mr-1 text-xs text-muted">Excluir jogador?</span>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setDeleteConfirm(null)}
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          onClick={() => handleDelete(player.id)}
+                        >
+                          Excluir
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-icon"
+                          onClick={() => openEdit(player)}
+                          title="Editar"
+                          aria-label={`Editar ${player.name}`}
+                        >
+                          <IconPencil />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-icon hover:text-danger"
+                          onClick={() => setDeleteConfirm(player.id)}
+                          title="Excluir"
+                          aria-label={`Excluir ${player.name}`}
+                        >
+                          <IconTrash />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
 
-                  {deleteConfirm === player.id ? (
-                    <div className="flex items-center gap-1 bg-red-950/40 p-1 rounded-lg border border-red-500/30">
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(player.id)}
-                        className="px-2 py-1 rounded text-[11px] font-bold bg-red-600 text-white hover:bg-red-500 transition-all cursor-pointer"
-                      >
-                        Excluir
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDeleteConfirm(null)}
-                        className="px-2 py-1 rounded text-[11px] text-zinc-400 hover:text-zinc-200 transition-all cursor-pointer"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => setDeleteConfirm(player.id)}
-                      className="p-2 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
-                      title="Excluir Jogador"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Add/Edit Modal */}
+      {/* Cadastro / edição */}
       <Modal
-        isOpen={showAddModal || !!editingPlayer}
-        onClose={() => {
-          setShowAddModal(false);
-          setEditingPlayer(null);
-          setNewName('');
-          setNewElos({});
-        }}
-        title={editingPlayer ? `Editar Jogador: ${editingPlayer.name}` : 'Cadastrar Novo Jogador'}
+        isOpen={editorOpen}
+        onClose={() => setEditorOpen(false)}
+        title={editingId ? 'Editar jogador' : 'Novo jogador'}
+        size="lg"
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={() => setEditorOpen(false)}>
+              Cancelar
+            </button>
+            <button type="submit" form="player-form" className="btn btn-primary" disabled={!formName.trim()}>
+              {editingId ? 'Salvar' : 'Cadastrar'}
+            </button>
+          </>
+        }
       >
-        <div className="space-y-4">
+        <form
+          id="player-form"
+          className="space-y-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            handleSubmit();
+          }}
+        >
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1.5">
-              Nome Completo / Apelido
+            <label htmlFor="player-name" className="field-label">
+              Nome
             </label>
             <input
+              id="player-name"
               type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Ex: Carlos, Mariana, Dudu..."
+              value={formName}
+              onChange={(e) => setFormName(e.target.value)}
+              maxLength={MAX_NAME_LENGTH}
+              placeholder="Como o jogador é chamado no grupo"
               autoFocus
-              className="w-full px-4 py-2.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-100 text-sm placeholder:text-zinc-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+              className="input"
             />
           </div>
+          <SportLevelPicker elos={formElos} onChange={setFormElos} />
+          {formPlaysPositionSport && (
+            <div>
+              <label htmlFor="player-position" className="field-label">
+                Posição no vôlei
+              </label>
+              <PositionSelect
+                id="player-position"
+                value={formPosition}
+                onChange={setFormPosition}
+                className="w-full"
+              />
+              <p className="mt-1.5 text-xs text-faint">
+                Vale para quarteto e sexteto. Cada time recebe ao menos 1 levantador e 2 ponteiros.
+              </p>
+            </div>
+          )}
+        </form>
+      </Modal>
 
-          <div>
-            <SportEloPicker
-              elos={newElos}
-              onChange={setNewElos}
-            />
-          </div>
-
-          <div className="flex gap-2.5 pt-3 border-t border-zinc-800">
-            <button
-              type="button"
-              onClick={() => {
-                setShowAddModal(false);
-                setEditingPlayer(null);
-                setNewName('');
-                setNewElos({});
-              }}
-              className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:bg-zinc-800 transition-all cursor-pointer"
-            >
+      {/* Importar */}
+      <Modal
+        isOpen={importOpen}
+        onClose={closeImport}
+        title="Importar jogadores"
+        description="Use um arquivo exportado pelo Equilibra. Jogadores com nomes já cadastrados são ignorados."
+        footer={
+          <>
+            <button type="button" className="btn btn-secondary" onClick={closeImport}>
               Cancelar
             </button>
             <button
               type="button"
-              onClick={editingPlayer ? handleEdit : handleAdd}
-              disabled={!newName.trim()}
-              className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
+              className="btn btn-primary"
+              onClick={handleImport}
+              disabled={!importText.trim()}
             >
-              {editingPlayer ? 'Salvar Alterações' : 'Cadastrar Jogador'}
+              Importar
             </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Cloud & Persistence Explainer Modal */}
-      <Modal
-        isOpen={showCloudModal}
-        onClose={() => setShowCloudModal(false)}
-        title="Persistência na Nuvem & Vercel"
-      >
-        <div className="space-y-4 text-xs text-zinc-300">
-          <p className="leading-relaxed">
-            O **Equilibra.ai** já vem pronto para funcionar em qualquer dispositivo (armazenamento local ativo).
-            Para que qualquer pessoa que acesse o link na Vercel veja os mesmos jogadores atualizados em tempo real, escolha uma das opções abaixo:
-          </p>
-
-          <div className="p-3.5 rounded-xl bg-violet-950/30 border border-violet-500/30 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-violet-300 text-sm">
-              <span>⚡</span> Opção 1: Vercel KV / Upstash (1 clique - Recomendado)
-            </div>
-            <p className="text-zinc-400">
-              Na dashboard do seu projeto na Vercel:
-              <br />
-              1. Acesse a aba **Storage**
-              <br />
-              2. Clique em **Connect Database** → **KV (Upstash)**
-              <br />
-              3. A Vercel adiciona as chaves automaticamente e seus jogadores ficam salvos na nuvem instantaneamente!
-            </p>
-          </div>
-
-          <div className="p-3.5 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2">
-            <div className="flex items-center gap-2 font-bold text-zinc-200 text-sm">
-              <span>🐙</span> Opção 2: Commit Automático no GitHub
-            </div>
-            <p className="text-zinc-400">
-              Quer que as alterações salvem direto no arquivo <code className="text-violet-300">src/data/players.json</code> do seu GitHub?
-              <br />
-              Basta adicionar 2 variáveis de ambiente na Vercel:
-              <br />
-              • <code className="text-zinc-200">GITHUB_TOKEN</code>: seu Personal Access Token do GitHub
-              <br />
-              • <code className="text-zinc-200">GITHUB_REPO</code>: seu repositório (ex: <code className="text-zinc-200">usuario/equilibra-ai</code>)
-              <br />
-              A cada clique em Salvar, a própria aplicação faz o commit no seu GitHub!
-            </p>
-          </div>
-
-          <div className="pt-2 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setShowCloudModal(false)}
-              className="px-4 py-2 rounded-xl text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white transition-all cursor-pointer"
-            >
-              Entendido!
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Import Modal */}
-      <Modal
-        isOpen={showImportModal}
-        onClose={() => {
-          setShowImportModal(false);
-          setImportText('');
-          setImportError('');
-        }}
-        title="Importar Lista de Jogadores"
+          </>
+        }
       >
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-2">
-              Selecione o arquivo players.json
+            <label htmlFor="import-file" className="field-label">
+              Arquivo JSON
             </label>
             <input
-              ref={fileInputRef}
+              id="import-file"
               type="file"
-              accept=".json"
-              onChange={handleFileImport}
-              className="block w-full text-xs text-zinc-400 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-violet-600 file:text-white hover:file:bg-violet-500 file:cursor-pointer mb-3"
+              accept=".json,application/json"
+              onChange={handleFile}
+              className="block w-full cursor-pointer text-sm text-muted file:mr-3 file:h-9 file:cursor-pointer file:rounded-lg file:border file:border-line file:bg-surface file:px-3 file:text-sm file:font-medium file:text-fg hover:file:bg-subtle"
             />
-            <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-1">
-              Ou cole o JSON diretamente:
+          </div>
+          <div>
+            <label htmlFor="import-text" className="field-label">
+              Ou cole o conteúdo
             </label>
             <textarea
+              id="import-text"
               value={importText}
               onChange={(e) => {
                 setImportText(e.target.value);
                 setImportError('');
               }}
-              placeholder='[{"id":"p1","name":"Neymar","elos":{"futsal":"high"}}]'
+              placeholder='[{"id": "p1", "name": "Ana", "elos": {"futsal": "high"}}]'
               rows={6}
-              className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-200 text-xs font-mono placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 resize-none"
+              className="input h-auto resize-none py-2.5 font-mono text-xs leading-relaxed"
             />
-            {importError && (
-              <p className="text-xs text-rose-400 mt-1 font-medium">{importError}</p>
-            )}
-          </div>
-
-          <div className="flex gap-2.5">
-            <button
-              type="button"
-              onClick={() => {
-                setShowImportModal(false);
-                setImportText('');
-                setImportError('');
-              }}
-              className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:bg-zinc-800 transition-all cursor-pointer"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={!importText.trim()}
-              className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
-            >
-              Importar Dados
-            </button>
+            {importError && <p className="mt-2 text-xs text-danger">{importError}</p>}
           </div>
         </div>
       </Modal>
