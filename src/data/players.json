@@ -1,0 +1,167 @@
+[
+  {
+    "id": "p_seed_01",
+    "name": "Tiago",
+    "elos": {
+      "society": "high",
+      "futsal": "high",
+      "volei-sexteto": "mid",
+      "volei-quarteto": "mid",
+      "volei-dupla": "mid",
+      "futebol": "high",
+      "basquete": "low",
+      "beach-tennis": "mid"
+    }
+  },
+  {
+    "id": "p_seed_02",
+    "name": "Lucas Silva",
+    "elos": {
+      "society": "high",
+      "futsal": "high",
+      "volei-sexteto": "low",
+      "futebol": "high"
+    }
+  },
+  {
+    "id": "p_seed_03",
+    "name": "Gabriel Santos",
+    "elos": {
+      "society": "high",
+      "futsal": "mid",
+      "volei-sexteto": "high",
+      "volei-quarteto": "high",
+      "beach-tennis": "high"
+    }
+  },
+  {
+    "id": "p_seed_04",
+    "name": "Mateus Oliveira",
+    "elos": {
+      "society": "mid",
+      "futsal": "mid",
+      "volei-sexteto": "high",
+      "volei-dupla": "high"
+    }
+  },
+  {
+    "id": "p_seed_05",
+    "name": "Rafael Costa",
+    "elos": {
+      "society": "mid",
+      "futsal": "high",
+      "volei-sexteto": "mid",
+      "futebol": "mid"
+    }
+  },
+  {
+    "id": "p_seed_06",
+    "name": "Bruno Souza",
+    "elos": {
+      "society": "mid",
+      "futsal": "low",
+      "volei-sexteto": "low",
+      "beach-tennis": "mid"
+    }
+  },
+  {
+    "id": "p_seed_07",
+    "name": "Rodrigo Lima",
+    "elos": {
+      "society": "mid",
+      "futsal": "mid",
+      "volei-sexteto": "mid",
+      "futebol": "mid"
+    }
+  },
+  {
+    "id": "p_seed_08",
+    "name": "Felipe Mendes",
+    "elos": {
+      "society": "low",
+      "futsal": "low",
+      "volei-sexteto": "low",
+      "beach-tennis": "low"
+    }
+  },
+  {
+    "id": "p_seed_09",
+    "name": "Guilherme Rocha",
+    "elos": {
+      "society": "low",
+      "futsal": "low",
+      "volei-sexteto": "mid",
+      "volei-quarteto": "mid"
+    }
+  },
+  {
+    "id": "p_seed_10",
+    "name": "Camila Ferreira",
+    "elos": {
+      "society": "low",
+      "futsal": "low",
+      "volei-sexteto": "high",
+      "volei-quarteto": "high",
+      "volei-dupla": "high",
+      "beach-tennis": "high"
+    }
+  },
+  {
+    "id": "p_seed_11",
+    "name": "Larissa Barbosa",
+    "elos": {
+      "society": "low",
+      "volei-sexteto": "high",
+      "volei-quarteto": "high",
+      "volei-dupla": "mid",
+      "beach-tennis": "high"
+    }
+  },
+  {
+    "id": "p_seed_12",
+    "name": "Mariana Ribeiro",
+    "elos": {
+      "society": "mid",
+      "volei-sexteto": "mid",
+      "volei-quarteto": "mid",
+      "beach-tennis": "mid"
+    }
+  },
+  {
+    "id": "p_seed_13",
+    "name": "Juliana Martins",
+    "elos": {
+      "society": "low",
+      "volei-sexteto": "low",
+      "beach-tennis": "low"
+    }
+  },
+  {
+    "id": "p_seed_14",
+    "name": "Diego Ramos",
+    "elos": {
+      "society": "high",
+      "futsal": "high",
+      "futebol": "high",
+      "basquete": "high"
+    }
+  },
+  {
+    "id": "p_seed_15",
+    "name": "André Moreira",
+    "elos": {
+      "society": "mid",
+      "futsal": "mid",
+      "volei-sexteto": "mid"
+    }
+  },
+  {
+    "id": "p_seed_16",
+    "name": "Thiago Castro",
+    "elos": {
+      "society": "low",
+      "futsal": "low",
+      "futebol": "low"
+    }
+  }
+]
