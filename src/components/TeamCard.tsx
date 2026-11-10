@@ -6,6 +6,8 @@ import { getEloShortLabel, getEloBgColor } from '@/lib/balancer';
 interface TeamCardProps {
   team: Team;
   index: number;
+  totalTeams?: number;
+  onMovePlayer?: (fromTeamIndex: number, playerIndex: number, toTeamIndex: number) => void;
 }
 
 const TEAM_THEMES = [
@@ -47,7 +49,12 @@ const TEAM_THEMES = [
   },
 ];
 
-export default function TeamCard({ team, index }: TeamCardProps) {
+export default function TeamCard({
+  team,
+  index,
+  totalTeams = 0,
+  onMovePlayer,
+}: TeamCardProps) {
   const theme = TEAM_THEMES[index % TEAM_THEMES.length];
   const highCount = team.players.filter((p) => p.elo === 'high').length;
   const midCount = team.players.filter((p) => p.elo === 'mid').length;
@@ -87,23 +94,54 @@ export default function TeamCard({ team, index }: TeamCardProps) {
         {team.players.map((player, pIdx) => (
           <div
             key={player.id}
-            className="flex items-center justify-between bg-zinc-950/60 border border-zinc-800/60 rounded-xl px-3.5 py-2.5 transition-colors hover:border-zinc-700/60"
+            className="flex items-center justify-between bg-zinc-950/60 border border-zinc-800/60 rounded-xl px-3.5 py-2.5 transition-colors hover:border-zinc-700/60 group"
           >
-            <div className="flex items-center gap-2.5">
-              <span className="text-xs text-zinc-500 font-mono w-4">
+            <div className="flex items-center gap-2.5 truncate pr-2">
+              <span className="text-xs text-zinc-500 font-mono w-4 shrink-0">
                 {pIdx + 1}.
               </span>
-              <span className="text-sm text-zinc-200 font-medium">
+              <span className="text-sm text-zinc-200 font-medium truncate">
                 {player.name}
               </span>
             </div>
-            <span
-              className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${getEloBgColor(
-                player.elo
-              )}`}
-            >
-              {getEloShortLabel(player.elo)}
-            </span>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-md border ${getEloBgColor(
+                  player.elo
+                )}`}
+              >
+                {getEloShortLabel(player.elo)}
+              </span>
+
+              {/* Move player dropdown if there are multiple teams */}
+              {totalTeams > 1 && onMovePlayer && (
+                <select
+                  defaultValue=""
+                  onChange={(e) => {
+                    const target = Number(e.target.value);
+                    if (!isNaN(target)) {
+                      onMovePlayer(index, pIdx, target);
+                    }
+                    e.target.value = '';
+                  }}
+                  className="bg-zinc-900 border border-zinc-800 text-[10px] text-zinc-500 hover:text-zinc-300 rounded px-1 py-0.5 focus:outline-none cursor-pointer"
+                  title="Mover este jogador para outro time"
+                >
+                  <option value="" disabled>
+                    ⇄ Mover
+                  </option>
+                  {Array.from({ length: totalTeams }).map((_, tIdx) => {
+                    if (tIdx === index) return null;
+                    return (
+                      <option key={tIdx} value={tIdx}>
+                        Para Time {String.fromCharCode(65 + tIdx)}
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
+            </div>
           </div>
         ))}
       </div>

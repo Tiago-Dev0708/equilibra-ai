@@ -144,3 +144,4 @@ export default function SportEloPicker({ elos, onChange }: SportEloPickerProps) 
     </div>
   );
 }
+

@@ -3,7 +3,12 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Player, Sport, Team, Elo } from '@/lib/types';
 import { SPORTS } from '@/lib/sports';
-import { loadPlayers, savePlayers, generateId } from '@/lib/storage';
+import {
+  loadPlayers,
+  syncPlayersFromServer,
+  savePlayers,
+  generateId,
+} from '@/lib/storage';
 import { balanceTeams, getEloShortLabel, getEloBgColor } from '@/lib/balancer';
 import SportSelector from '@/components/SportSelector';
 import EloSelector from '@/components/EloSelector';
@@ -18,6 +23,8 @@ export default function SorteioPage() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsAppText, setWhatsAppText] = useState('');
   const [newPlayerName, setNewPlayerName] = useState('');
   const [newPlayerElos, setNewPlayerElos] = useState<Record<string, Elo>>({
     [SPORTS[0].id]: 'mid',
@@ -34,6 +41,13 @@ export default function SorteioPage() {
       const eligible = loaded.filter((p) => p.elos[SPORTS[0].id] !== undefined);
       setSelectedPlayerIds(new Set(eligible.map((p) => p.id)));
     }
+
+    // Sync from cloud (Vercel KV or GitHub)
+    syncPlayersFromServer().then((remote) => {
+      if (remote && remote.length > 0) {
+        setAllPlayers(remote);
+      }
+    });
   }, []);
 
   const handleSelectSport = useCallback((sport: Sport) => {
@@ -145,7 +159,7 @@ export default function SorteioPage() {
   }, [selectedSport]);
 
   const handleAddPlayer = useCallback(() => {
-    if (!newNamePlayerTrimmed) return;
+    if (!newPlayerName.trim()) return;
     const player: Player = {
       id: generateId(),
       name: newPlayerName.trim(),
@@ -164,7 +178,77 @@ export default function SorteioPage() {
     setShowAddModal(false);
   }, [newPlayerName, newPlayerElos, allPlayers, selectedSport]);
 
-  const newNamePlayerTrimmed = newPlayerName.trim();
+  // WhatsApp bulk list parser
+  const handleImportWhatsApp = useCallback(() => {
+    if (!whatsAppText.trim() || !selectedSport) return;
+    const lines = whatsAppText.split('\n');
+    const names: string[] = [];
+
+    for (const raw of lines) {
+      let cleaned = raw.trim();
+      cleaned = cleaned.replace(/^[\d\s.\-–—)\]#*•]+/, '').trim();
+      if (!cleaned || cleaned.length < 2) continue;
+      const lower = cleaned.toLowerCase();
+      if (lower.startsWith('lista') || lower.startsWith('pelada') || lower.startsWith('jogo')) {
+        continue;
+      }
+      names.push(cleaned);
+    }
+
+    if (names.length === 0) return;
+
+    let current = [...allPlayers];
+    const newSelected = new Set(selectedPlayerIds);
+    let dirty = false;
+
+    for (const name of names) {
+      const existing = current.find(
+        (p) => p.name.toLowerCase() === name.toLowerCase()
+      );
+      if (existing) {
+        if (existing.elos[selectedSport.id] === undefined) {
+          existing.elos[selectedSport.id] = 'mid';
+          dirty = true;
+        }
+        newSelected.add(existing.id);
+      } else {
+        const newP: Player = {
+          id: generateId(),
+          name,
+          elos: { [selectedSport.id]: 'mid' },
+        };
+        current.push(newP);
+        newSelected.add(newP.id);
+        dirty = true;
+      }
+    }
+
+    if (dirty) {
+      setAllPlayers(current);
+      savePlayers(current);
+    }
+    setSelectedPlayerIds(newSelected);
+    setShowWhatsAppModal(false);
+    setWhatsAppText('');
+    setTeams([]);
+  }, [whatsAppText, selectedSport, allPlayers, selectedPlayerIds]);
+
+  // Move player between teams manually
+  const handleMovePlayer = useCallback(
+    (fromTeamIndex: number, playerIndex: number, toTeamIndex: number) => {
+      setTeams((prev) => {
+        if (fromTeamIndex === toTeamIndex) return prev;
+        const next = prev.map((t) => ({ ...t, players: [...t.players] }));
+        const [moved] = next[fromTeamIndex].players.splice(playerIndex, 1);
+        if (!moved) return prev;
+        next[toTeamIndex].players.push(moved);
+        next[fromTeamIndex].totalScore -= moved.score;
+        next[toTeamIndex].totalScore += moved.score;
+        return next;
+      });
+    },
+    []
+  );
 
   // Filtered lists according to search
   const filteredSportPlayers = useMemo(() => {
@@ -256,26 +340,37 @@ export default function SorteioPage() {
               Defina o esporte e selecione os jogadores presentes. O sistema lista quem pratica a modalidade com seu respectivo Elo.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleOpenAddModal}
-            className="self-start sm:self-center px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-sm font-semibold shadow-lg shadow-violet-600/30 transition-all flex items-center gap-2 whitespace-nowrap cursor-pointer"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <button
+              type="button"
+              onClick={() => setShowWhatsAppModal(true)}
+              className="px-3.5 py-2.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-xs font-bold transition-all shadow-lg shadow-emerald-500/10 flex items-center gap-1.5 cursor-pointer whitespace-nowrap"
+              title="Colar lista de nomes direto do grupo do WhatsApp"
             >
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            Adicionar Jogador
-          </button>
+              <span>📋</span> Colar do WhatsApp
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenAddModal}
+              className="px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold shadow-lg shadow-violet-600/30 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Adicionar Jogador
+            </button>
+          </div>
         </div>
       </div>
 
@@ -411,7 +506,7 @@ export default function SorteioPage() {
 
               {filteredSportPlayers.length === 0 ? (
                 <div className="text-center py-8 text-zinc-500 text-xs border border-dashed border-zinc-800/80 rounded-xl bg-zinc-950/20">
-                  Nenhum jogador cadastrado nesta modalidade ainda. Ative jogadores abaixo ou cadastre um novo!
+                  Nenhum jogador cadastrado nesta modalidade ainda. Cole uma lista do WhatsApp ou adicione jogadores abaixo!
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[340px] overflow-y-auto pr-1">
@@ -600,7 +695,7 @@ export default function SorteioPage() {
                     </span>
                   </div>
                   <p className="text-xs text-zinc-400 mt-1">
-                    Equilíbrio otimizado por pontuação de Elo (High = 3, Mid = 2, Low = 1)
+                    Equilíbrio por pontuação de Elo (High = 3, Mid = 2, Low = 1) • É possível remanejar jogadores diretamente nos cartões.
                   </p>
                 </div>
 
@@ -624,7 +719,13 @@ export default function SorteioPage() {
               {/* Team Cards Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {teams.map((team, idx) => (
-                  <TeamCard key={idx} team={team} index={idx} />
+                  <TeamCard
+                    key={idx}
+                    team={team}
+                    index={idx}
+                    totalTeams={teams.length}
+                    onMovePlayer={handleMovePlayer}
+                  />
                 ))}
               </div>
 
@@ -659,6 +760,49 @@ export default function SorteioPage() {
           )}
         </>
       )}
+
+      {/* WhatsApp Bulk List Modal */}
+      <Modal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        title="Colar Lista do WhatsApp"
+      >
+        <div className="space-y-4 text-xs text-zinc-300">
+          <p className="text-zinc-400">
+            Cole a lista de confirmados copiada do WhatsApp. O sistema extrai os nomes (removendo números como &quot;1.&quot;, &quot;2 -&quot;) e já escala automaticamente em{' '}
+            <strong className="text-violet-300">{selectedSport?.name}</strong>:
+          </p>
+
+          <textarea
+            value={whatsAppText}
+            onChange={(e) => setWhatsAppText(e.target.value)}
+            placeholder={`1. Tiago\n2. Lucas Silva\n3. Gabriel\n4. Mateus\n5. Rodrigo Lima`}
+            rows={8}
+            className="w-full px-3.5 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-100 text-xs font-mono placeholder:text-zinc-600 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+          />
+
+          <div className="flex gap-2.5 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowWhatsAppModal(false);
+                setWhatsAppText('');
+              }}
+              className="flex-1 px-4 py-2.5 rounded-xl text-xs font-semibold text-zinc-400 hover:text-zinc-200 border border-zinc-700 hover:bg-zinc-800 transition-all cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleImportWhatsApp}
+              disabled={!whatsAppText.trim()}
+              className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
+            >
+              Escalar Jogadores da Lista
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Quick Add Player Modal */}
       <Modal
@@ -699,7 +843,7 @@ export default function SorteioPage() {
             <button
               type="button"
               onClick={handleAddPlayer}
-              disabled={!newNamePlayerTrimmed}
+              disabled={!newPlayerName.trim()}
               className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
             >
               Cadastrar Jogador

@@ -22,21 +22,41 @@ export function loadPlayers(): Player[] {
   return (defaultPlayersData as Player[]) || [];
 }
 
-export function savePlayers(players: Player[]): void {
-  if (typeof window === 'undefined') return;
+export async function syncPlayersFromServer(): Promise<Player[] | null> {
+  if (typeof window === 'undefined') return null;
+  try {
+    const res = await fetch('/api/players', { cache: 'no-store' });
+    if (res.ok) {
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+        return data as Player[];
+      }
+    }
+  } catch (err) {
+    console.error('Error syncing from server:', err);
+  }
+  return null;
+}
+
+export async function savePlayers(
+  players: Player[]
+): Promise<{ success?: boolean; provider?: string; message?: string }> {
+  if (typeof window === 'undefined') return {};
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(players));
-    // Asynchronously update file on disk via API route for local development persistence
-    fetch('/api/players', {
+    const res = await fetch('/api/players', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(players),
-    }).catch(() => {
-      // Ignored if in read-only environment
     });
+    if (res.ok) {
+      return await res.json();
+    }
   } catch (err) {
-    console.error('Error saving players to localStorage', err);
+    console.error('Error saving players to server:', err);
   }
+  return { success: true, provider: 'local' };
 }
 
 export function exportPlayersJSON(players: Player[]): string {

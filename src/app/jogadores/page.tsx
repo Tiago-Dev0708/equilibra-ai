@@ -5,6 +5,7 @@ import { Player, Elo } from '@/lib/types';
 import { SPORTS } from '@/lib/sports';
 import {
   loadPlayers,
+  syncPlayersFromServer,
   savePlayers,
   exportPlayersJSON,
   importPlayersJSON,
@@ -20,6 +21,8 @@ export default function JogadoresPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSportFilter, setSelectedSportFilter] = useState<string>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCloudModal, setShowCloudModal] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [newName, setNewName] = useState('');
   const [newElos, setNewElos] = useState<Record<string, Elo>>({});
@@ -30,7 +33,24 @@ export default function JogadoresPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // 1. Load locally immediately
     setPlayers(loadPlayers());
+
+    // 2. Sync from server (Vercel KV, GitHub or local API)
+    syncPlayersFromServer().then((remote) => {
+      if (remote && remote.length > 0) {
+        setPlayers(remote);
+      }
+    });
+  }, []);
+
+  const triggerSave = useCallback(async (updated: Player[]) => {
+    setPlayers(updated);
+    const result = await savePlayers(updated);
+    if (result.message) {
+      setSaveStatus(result.message);
+      setTimeout(() => setSaveStatus(null), 3500);
+    }
   }, []);
 
   const filteredPlayers = players.filter((p) => {
@@ -48,12 +68,11 @@ export default function JogadoresPage() {
       elos: { ...newElos },
     };
     const updated = [player, ...players];
-    setPlayers(updated);
-    savePlayers(updated);
+    triggerSave(updated);
     setNewName('');
     setNewElos({});
     setShowAddModal(false);
-  }, [newName, newElos, players]);
+  }, [newName, newElos, players, triggerSave]);
 
   const handleEdit = useCallback(() => {
     if (!editingPlayer || !newName.trim()) return;
@@ -62,21 +81,19 @@ export default function JogadoresPage() {
         ? { ...p, name: newName.trim(), elos: { ...newElos } }
         : p
     );
-    setPlayers(updated);
-    savePlayers(updated);
+    triggerSave(updated);
     setEditingPlayer(null);
     setNewName('');
     setNewElos({});
-  }, [editingPlayer, newName, newElos, players]);
+  }, [editingPlayer, newName, newElos, players, triggerSave]);
 
   const handleDelete = useCallback(
     (id: string) => {
       const updated = players.filter((p) => p.id !== id);
-      setPlayers(updated);
-      savePlayers(updated);
+      triggerSave(updated);
       setDeleteConfirm(null);
     },
-    [players]
+    [players, triggerSave]
   );
 
   const openEdit = useCallback((player: Player) => {
@@ -99,10 +116,9 @@ export default function JogadoresPage() {
   const handleRestoreDefaults = useCallback(() => {
     if (confirm('Deseja restaurar a lista padrão com jogadores de exemplo?')) {
       const defaults = defaultPlayersData as Player[];
-      setPlayers(defaults);
-      savePlayers(defaults);
+      triggerSave(defaults);
     }
-  }, []);
+  }, [triggerSave]);
 
   const handleImport = useCallback(() => {
     const imported = importPlayersJSON(importText);
@@ -113,12 +129,11 @@ export default function JogadoresPage() {
     const existingNames = new Set(players.map((p) => p.name.toLowerCase()));
     const newOnes = imported.filter((p) => !existingNames.has(p.name.toLowerCase()));
     const updated = [...players, ...newOnes];
-    setPlayers(updated);
-    savePlayers(updated);
+    triggerSave(updated);
     setShowImportModal(false);
     setImportText('');
     setImportError('');
-  }, [importText, players]);
+  }, [importText, players, triggerSave]);
 
   const handleFileImport = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -136,6 +151,14 @@ export default function JogadoresPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+      {/* Toast Notification */}
+      {saveStatus && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl bg-zinc-900 border border-violet-500/40 text-violet-300 text-xs font-semibold shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2">
+          <span>✓</span>
+          <span>{saveStatus}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
@@ -155,18 +178,26 @@ export default function JogadoresPage() {
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
+            onClick={() => setShowCloudModal(true)}
+            className="px-3.5 py-2 rounded-xl border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+            title="Ver opções de sincronização na Vercel e nuvem"
+          >
+            <span>☁️</span> Nuvem & Vercel
+          </button>
+          <button
+            type="button"
             onClick={() => setShowImportModal(true)}
-            className="px-3.5 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
+            className="px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5"
             title="Importar arquivo JSON de jogadores"
           >
-            <span>📥</span> Importar JSON
+            <span>📥</span> Importar
           </button>
           <button
             type="button"
             onClick={handleExport}
             disabled={players.length === 0}
-            className="px-3.5 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
-            title="Baixar arquivo JSON para salvar no repositório / commit"
+            className="px-3 py-2 rounded-xl border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-40"
+            title="Baixar arquivo JSON para backup"
           >
             <span>📤</span> Salvar JSON
           </button>
@@ -440,6 +471,62 @@ export default function JogadoresPage() {
               className="flex-1 px-4 py-2.5 rounded-xl text-xs font-bold bg-violet-600 hover:bg-violet-500 text-white disabled:bg-zinc-800 disabled:text-zinc-600 transition-all cursor-pointer"
             >
               {editingPlayer ? 'Salvar Alterações' : 'Cadastrar Jogador'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Cloud & Persistence Explainer Modal */}
+      <Modal
+        isOpen={showCloudModal}
+        onClose={() => setShowCloudModal(false)}
+        title="Persistência na Nuvem & Vercel"
+      >
+        <div className="space-y-4 text-xs text-zinc-300">
+          <p className="leading-relaxed">
+            O **Equilibra.ai** já vem pronto para funcionar em qualquer dispositivo (armazenamento local ativo).
+            Para que qualquer pessoa que acesse o link na Vercel veja os mesmos jogadores atualizados em tempo real, escolha uma das opções abaixo:
+          </p>
+
+          <div className="p-3.5 rounded-xl bg-violet-950/30 border border-violet-500/30 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-violet-300 text-sm">
+              <span>⚡</span> Opção 1: Vercel KV / Upstash (1 clique - Recomendado)
+            </div>
+            <p className="text-zinc-400">
+              Na dashboard do seu projeto na Vercel:
+              <br />
+              1. Acesse a aba **Storage**
+              <br />
+              2. Clique em **Connect Database** → **KV (Upstash)**
+              <br />
+              3. A Vercel adiciona as chaves automaticamente e seus jogadores ficam salvos na nuvem instantaneamente!
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-zinc-900 border border-zinc-800 space-y-2">
+            <div className="flex items-center gap-2 font-bold text-zinc-200 text-sm">
+              <span>🐙</span> Opção 2: Commit Automático no GitHub
+            </div>
+            <p className="text-zinc-400">
+              Quer que as alterações salvem direto no arquivo <code className="text-violet-300">src/data/players.json</code> do seu GitHub?
+              <br />
+              Basta adicionar 2 variáveis de ambiente na Vercel:
+              <br />
+              • <code className="text-zinc-200">GITHUB_TOKEN</code>: seu Personal Access Token do GitHub
+              <br />
+              • <code className="text-zinc-200">GITHUB_REPO</code>: seu repositório (ex: <code className="text-zinc-200">usuario/equilibra-ai</code>)
+              <br />
+              A cada clique em Salvar, a própria aplicação faz o commit no seu GitHub!
+            </p>
+          </div>
+
+          <div className="pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setShowCloudModal(false)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-violet-600 hover:bg-violet-500 text-white transition-all cursor-pointer"
+            >
+              Entendido!
             </button>
           </div>
         </div>
